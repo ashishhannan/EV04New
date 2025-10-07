@@ -3,9 +3,9 @@ server:
 
 spring:
   datasource:
-    url: jdbc:postgresql://${PGHOST:postgres-djif.railway.internal}:${PGPORT:5432}/${PGDATABASE:railway}
+    url: jdbc:postgresql://${PGHOST:postgres.railway.internal}:${PGPORT:5432}/${PGDATABASE:railway}
     username: ${PGUSER:postgres}
-    password: ${PGPASSWORD:ZijwfXdvQpTwYhWoWkTgwrmcqEapqVGY}
+    password: ${PGPASSWORD:HNQjlgpTsNTeFeCySxBMCdbXyCaJpYEG}
   jpa:
     hibernate:
       ddl-auto: validate

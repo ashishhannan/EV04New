@@ -17,6 +17,7 @@ public class CommandLogEntity {
     private Integer commandId;
 
     @Lob
+    @Column(name = "payload", columnDefinition = "bytea")
     private byte[] payload;
 
     @Column(name = "created_at")

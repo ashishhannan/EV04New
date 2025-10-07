@@ -14,6 +14,7 @@ public class PendingCommandEntity {
     private String deviceId;
 
     @Lob
+    @Column(name = "payload", columnDefinition = "bytea")
     private byte[] payload;
 
     @Column(name = "created_at")

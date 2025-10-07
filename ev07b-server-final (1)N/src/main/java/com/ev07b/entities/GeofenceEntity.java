@@ -16,6 +16,7 @@ public class GeofenceEntity {
     private String name;
 
     @Lob
+    @Column(name = "payload", columnDefinition = "bytea")
     private byte[] payload;
 
     @Column(name = "created_at")

@@ -3,7 +3,7 @@ server:
 
 spring:
   datasource:
-    url: jdbc:postgresql://${PGHOST:postgres.railway.internal}:${PGPORT:5432}/${PGDATABASE:railway}
+    url: jdbc:postgresql://${PGHOST:shuttle.proxy.rlwy.net}:${PGPORT:36506}/${PGDATABASE:railway}
     username: ${PGUSER:postgres}
     password: ${PGPASSWORD:HNQjlgpTsNTeFeCySxBMCdbXyCaJpYEG}
   jpa:

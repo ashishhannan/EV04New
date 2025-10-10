@@ -3,11 +3,9 @@ server:
 
 spring:
   datasource:
-    # Use the JDBC URL format (required by the PostgreSQL JDBC driver)
-    url: jdbc:postgresql://${PGHOST:trolley.proxy.rlwy.net}:${PGPORT:37324}/${PGDATABASE:railway}?sslmode=require
+    url: jdbc:postgresql://${PGHOST:shuttle.proxy.rlwy.net}:${PGPORT:36506}/${PGDATABASE:railway}
     username: ${PGUSER:postgres}
-    password: ${PGPASSWORD:enCgwjEOfvppzwyEXltXtHkdWobQvUNd}
-    driver-class-name: org.postgresql.Driver
+    password: ${PGPASSWORD:HNQjlgpTsNTeFeCySxBMCdbXyCaJpYEG}
   jpa:
     hibernate:
       ddl-auto: validate

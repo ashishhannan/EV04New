@@ -1,6 +1,7 @@
 server:
   port: 8080
 
+
 spring:
   datasource:
     url: jdbc:postgresql://${PGHOST:shuttle.proxy.rlwy.net}:${PGPORT:36506}/${PGDATABASE:railway}

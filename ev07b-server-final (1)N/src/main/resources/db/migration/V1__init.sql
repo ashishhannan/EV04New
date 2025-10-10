@@ -1,4 +1,4 @@
--- V1 initial schema
+
 CREATE TABLE device (
   id varchar(64) PRIMARY KEY,
   last_seen timestamp,

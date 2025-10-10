@@ -2,6 +2,8 @@ package com.ev07b.entities;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "pending_command")
@@ -13,8 +15,8 @@ public class PendingCommandEntity {
     @Column(name = "device_id")
     private String deviceId;
 
-    @Lob
-    @Column(name = "payload", columnDefinition = "bytea")
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "payload")
     private byte[] payload;
 
     @Column(name = "created_at")

@@ -1,4 +1,4 @@
--- V1 initial schema
+
 CREATE TABLE device (
   id varchar(64) PRIMARY KEY,
   last_seen timestamp,
@@ -6,7 +6,7 @@ CREATE TABLE device (
 );
 
 CREATE TABLE geofence (
-  id serial PRIMARY KEY,
+  id bigint PRIMARY KEY,
   device_id varchar(64),
   name varchar(255),
   payload bytea,
@@ -14,7 +14,7 @@ CREATE TABLE geofence (
 );
 
 CREATE TABLE command_log (
-  id serial PRIMARY KEY,
+  id bigint PRIMARY KEY,
   device_id varchar(64),
   command_id integer,
   payload bytea,
@@ -22,7 +22,7 @@ CREATE TABLE command_log (
 );
 
 CREATE TABLE pending_command (
-  id serial PRIMARY KEY,
+  id bigint PRIMARY KEY,
   device_id varchar(64),
   payload bytea,
   created_at timestamp DEFAULT now()

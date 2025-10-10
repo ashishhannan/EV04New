@@ -1,5 +1,7 @@
 package com.ev07b.rest;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.ev07b.repos.GeofenceRepository;
@@ -15,6 +17,7 @@ import java.util.HashMap;
 @RequestMapping("/api/geofences")
 public class GeoFenceController {
 
+    private static final Logger log = LoggerFactory.getLogger(GeoFenceController.class);
     @Autowired
     private GeofenceRepository geofenceRepo;
 

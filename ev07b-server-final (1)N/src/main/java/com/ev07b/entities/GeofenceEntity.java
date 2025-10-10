@@ -2,6 +2,8 @@ package com.ev07b.entities;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "geofence")
@@ -13,10 +15,12 @@ public class GeofenceEntity {
     @Column(name = "device_id")
     private String deviceId;
 
+    @Column(name = "name")
     private String name;
 
-    @Lob
-    @Column(name = "payload", columnDefinition = "bytea")
+    // Use bytea mapping (binary) instead of OID/BLOB
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "payload")
     private byte[] payload;
 
     @Column(name = "created_at")

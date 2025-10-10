@@ -1,13 +1,12 @@
 server:
   port: 8080
 
+
 spring:
   datasource:
-    # Use the JDBC URL format (required by the PostgreSQL JDBC driver)
-    url: jdbc:postgresql://${PGHOST:trolley.proxy.rlwy.net}:${PGPORT:37324}/${PGDATABASE:railway}?sslmode=require
+    url: jdbc:postgresql://${PGHOST:trolley.proxy.rlwy.net}:${PGPORT:37324}/${PGDATABASE:railway}
     username: ${PGUSER:postgres}
     password: ${PGPASSWORD:enCgwjEOfvppzwyEXltXtHkdWobQvUNd}
-    driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
       ddl-auto: validate

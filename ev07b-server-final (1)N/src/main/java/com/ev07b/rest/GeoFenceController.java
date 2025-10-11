@@ -8,6 +8,8 @@ import com.ev07b.repos.GeofenceRepository;
 import com.ev07b.entities.GeofenceEntity;
 import com.ev07b.commands.DeviceConnectionManager;
 import com.ev07b.services.CommandService;
+import com.ev07b.net.FrameUtil;
+import com.ev07b.net.SequenceManager;
 
 import java.util.List;
 import java.util.Map;
@@ -18,6 +20,8 @@ import java.util.HashMap;
 public class GeoFenceController {
 
     private static final Logger log = LoggerFactory.getLogger(GeoFenceController.class);
+    private static final byte CMD_GEOFENCE = (byte) 0x51;
+
     @Autowired
     private GeofenceRepository geofenceRepo;
 
@@ -26,6 +30,9 @@ public class GeoFenceController {
 
     @Autowired
     private CommandService commandService;
+
+    @Autowired
+    private SequenceManager sequenceManager;
 
     @GetMapping("/{deviceId}")
     public List<GeofenceEntity> listForDevice(@PathVariable String deviceId) {
@@ -42,11 +49,22 @@ public class GeoFenceController {
         GeofenceEntity g = new GeofenceEntity(deviceId, name, payload);
         GeofenceEntity saved = geofenceRepo.save(g);
 
+        // Build device-facing framed message: [cmd=0x51][payload...] wrapped as protocol frame
+        byte[] bodyBytes = new byte[1 + payload.length];
+        bodyBytes[0] = CMD_GEOFENCE;
+        System.arraycopy(payload, 0, bodyBytes, 1, payload.length);
+
+        byte properties = 0x10; // request ACK or set flags per protocol as needed
+        int seq = sequenceManager.next(deviceId);
+        byte[] frame = FrameUtil.buildFrame(properties, seq, bodyBytes);
+
         io.netty.channel.Channel ch = connMgr.getChannel(deviceId);
         if (ch != null && ch.isActive()) {
-            ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(payload));
+            log.info("Sending framed geofence to device {} seq={}", deviceId, seq);
+            ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(frame));
         } else {
-            commandService.queuePending(deviceId, payload);
+            log.info("Device offline; queueing framed geofence for {} seq={}", deviceId, seq);
+            commandService.queuePending(deviceId, frame);
         }
         return saved;
     }
@@ -61,14 +79,26 @@ public class GeoFenceController {
             return res;
         }
 
+        // Build framed body with commandId prefix
+        byte[] pl = g.getPayload();
+        byte[] bodyBytes = new byte[1 + (pl == null ? 0 : pl.length)];
+        bodyBytes[0] = CMD_GEOFENCE;
+        if (pl != null && pl.length > 0) System.arraycopy(pl, 0, bodyBytes, 1, pl.length);
+
+        byte properties = 0x10;
+        int seq = sequenceManager.next(deviceId);
+        byte[] frame = FrameUtil.buildFrame(properties, seq, bodyBytes);
+
         io.netty.channel.Channel ch = connMgr.getChannel(deviceId);
         if (ch != null && ch.isActive()) {
-            ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(g.getPayload()));
+            ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(frame));
             res.put("sent", true);
+            res.put("seq", seq);
         } else {
-            commandService.queuePending(deviceId, g.getPayload());
+            commandService.queuePending(deviceId, frame);
             res.put("sent", false);
             res.put("queued", true);
+            res.put("seq", seq);
         }
         return res;
     }

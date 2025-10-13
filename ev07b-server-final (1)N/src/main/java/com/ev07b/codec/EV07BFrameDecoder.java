@@ -46,7 +46,7 @@ public class EV07BFrameDecoder extends ByteToMessageDecoder {
             return;
         }
 
-        byte properties = in.readByte(); // protocol flag bits, not used here
+        byte properties = in.readByte(); // protocol flag bits
         int lenLow = in.readUnsignedByte();
         int lenHigh = in.readUnsignedByte();
         int bodyLen = (lenHigh << 8) | lenLow;
@@ -78,7 +78,7 @@ public class EV07BFrameDecoder extends ByteToMessageDecoder {
         int commandId = (bodyBytes.length > 0) ? (bodyBytes[0] & 0xFF) : 0;
         String deviceId = extractDeviceId(bodyBytes);
 
-        EV07BMessage message = new EV07BMessage(deviceId, commandId, bodyBytes);
+        EV07BMessage message = new EV07BMessage(deviceId, commandId, bodyBytes, properties, seqId);
         out.add(message);
     }
 

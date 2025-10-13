@@ -7,7 +7,8 @@ import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "geofence")
-public class GeofenceEntity {
+public class
+GeofenceEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

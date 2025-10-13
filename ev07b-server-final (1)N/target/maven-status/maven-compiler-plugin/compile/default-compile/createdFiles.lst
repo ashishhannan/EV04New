@@ -29,4 +29,5 @@ com\ev07b\net\EV07BServerInitializer.class
 com\ev07b\server\EV070Server$1.class
 com\ev07b\rest\GeoFenceController.class
 com\ev07b\entities\PendingCommandEntity.class
+com\ev07b\commands\EV04HeartbeatProcessor.class
 com\ev07b\net\EV07BFrameEncoder.class

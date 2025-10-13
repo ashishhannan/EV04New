@@ -23,6 +23,7 @@ C:\Users\mohdn\IdeaProjects\EV04New\ev07b-server-final (1)N\src\main\java\com\ev
 C:\Users\mohdn\IdeaProjects\EV04New\ev07b-server-final (1)N\src\main\java\com\ev07b\NettyServerStarter.java
 C:\Users\mohdn\IdeaProjects\EV04New\ev07b-server-final (1)N\src\main\java\com\ev07b\services\CommandService.java
 C:\Users\mohdn\IdeaProjects\EV04New\ev07b-server-final (1)N\src\main\java\com\ev07b\commands\DeviceConnectionManager.java
+C:\Users\mohdn\IdeaProjects\EV04New\ev07b-server-final (1)N\src\main\java\com\ev07b\commands\EV04HeartbeatProcessor.java
 C:\Users\mohdn\IdeaProjects\EV04New\ev07b-server-final (1)N\src\main\java\com\ev07b\entities\CommandLogEntity.java
 C:\Users\mohdn\IdeaProjects\EV04New\ev07b-server-final (1)N\src\main\java\com\ev07b\Application.java
 C:\Users\mohdn\IdeaProjects\EV04New\ev07b-server-final (1)N\src\main\java\com\ev07b\repos\GeofenceRepository.java

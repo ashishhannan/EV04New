@@ -41,19 +41,38 @@ public class GeoFenceController {
 
     @PostMapping("/{deviceId}")
     public GeofenceEntity create(@PathVariable String deviceId, @RequestBody Map<String,Object> body) {
-        String name = (String) body.getOrDefault("name", "geofence-" + System.currentTimeMillis());
-        String b64 = (String) body.get("payloadBase64");
-        byte[] payload = new byte[0];
-        if (b64 != null) payload = java.util.Base64.getDecoder().decode(b64);
+        // Only accept radius from user
+        int radius = 100; // default
+        if (body.containsKey("radius")) {
+            Object r = body.get("radius");
+            if (r instanceof Number) radius = ((Number) r).intValue();
+            else if (r instanceof String) radius = Integer.parseInt((String) r);
+        }
+        // Build flag: circle (bit 0), enable (bit 8), radius (bits 16-31)
+        int flag = (1 << 8) | (radius << 16); // circle, enable, radius
+        // For demo, use dummy lat/lon (0)
+        int lat = 0;
+        int lon = 0;
+        byte[] payload = new byte[1 + 4 + 4 + 4]; // key + flag + lat + lon
+        payload[0] = CMD_GEOFENCE;
+        payload[1] = (byte) ((flag >> 24) & 0xFF);
+        payload[2] = (byte) ((flag >> 16) & 0xFF);
+        payload[3] = (byte) ((flag >> 8) & 0xFF);
+        payload[4] = (byte) (flag & 0xFF);
+        payload[5] = (byte) ((lat >> 24) & 0xFF);
+        payload[6] = (byte) ((lat >> 16) & 0xFF);
+        payload[7] = (byte) ((lat >> 8) & 0xFF);
+        payload[8] = (byte) (lat & 0xFF);
+        payload[9] = (byte) ((lon >> 24) & 0xFF);
+        payload[10] = (byte) ((lon >> 16) & 0xFF);
+        payload[11] = (byte) ((lon >> 8) & 0xFF);
+        payload[12] = (byte) (lon & 0xFF);
 
-        GeofenceEntity g = new GeofenceEntity(deviceId, name, payload);
+        GeofenceEntity g = new GeofenceEntity(deviceId, "geofence-" + System.currentTimeMillis(), payload);
         GeofenceEntity saved = geofenceRepo.save(g);
 
         // Build device-facing framed message: [cmd=0x51][payload...] wrapped as protocol frame
-        byte[] bodyBytes = new byte[1 + payload.length];
-        bodyBytes[0] = CMD_GEOFENCE;
-        System.arraycopy(payload, 0, bodyBytes, 1, payload.length);
-
+        byte[] bodyBytes = payload;
         byte properties = 0x10; // request ACK or set flags per protocol as needed
         int seq = sequenceManager.next(deviceId);
         byte[] frame = FrameUtil.buildFrame(properties, seq, bodyBytes);

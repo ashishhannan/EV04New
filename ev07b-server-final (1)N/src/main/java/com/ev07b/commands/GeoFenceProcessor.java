@@ -10,6 +10,8 @@ import com.ev07b.entities.GeofenceEntity;
 import com.ev07b.entities.CommandLogEntity;
 import com.ev07b.services.CommandService;
 import com.ev07b.services.DeviceService;
+import com.ev07b.net.FrameUtil;
+import com.ev07b.commands.DeviceConnectionManager;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -68,10 +70,16 @@ public class GeoFenceProcessor implements CommandProcessor {
         // Persist a GeofenceEntity for now with raw payload and a simple name
         GeofenceEntity g = new GeofenceEntity(deviceId, "geofence-" + System.currentTimeMillis(), payload);
         geofenceRepo.save(g);
+        System.out.println("[GeoFenceProcessor] Saved geofence for device " + deviceId + ", points=" + parsed.size());
 
         System.out.println("[GeoFenceProcessor] Parsed geofence items: " + parsed.size());
+        if (!parsed.isEmpty()) {
+            for (int i = 0; i < parsed.size(); i++) {
+                System.out.println("  point[" + i + "]: " + parsed.get(i));
+            }
+        }
 
-        // Example: send ACK according to protocol (placeholder)
+        // Send protocol-correct ACK frame back to device
         byte[] ack = buildAck(msg);
         if (ch != null && ch.isActive()) {
             ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(ack));
@@ -87,10 +95,69 @@ public class GeoFenceProcessor implements CommandProcessor {
 
         try {
             ByteBuffer bb = ByteBuffer.wrap(payload);
-            bb.order(java.nio.ByteOrder.BIG_ENDIAN); // adjust per protocol
+            // Protocol doc: little-endian overall
+            bb.order(java.nio.ByteOrder.LITTLE_ENDIAN);
 
-            int remaining = bb.remaining();
-            if (remaining < 1) return out;
+            // Must start with command 0x51 in our design
+            if (bb.remaining() < 1) return out;
+            int first = Byte.toUnsignedInt(bb.get());
+            if (first != GEOFENCE_CMD) {
+                // Backward compatibility: legacy format [n][pointsBE]
+                return parseLegacyBigEndian(payload);
+            }
+
+            if (bb.remaining() < 4) return out; // need flags
+            int flags = bb.getInt(); // LE
+
+            // Decode flags per doc
+            int index = (flags) & 0x0F;
+            int pointsBits = (flags >>> 4) & 0x0F;
+            boolean enable = ((flags >>> 8) & 0x01) == 1;
+            int direction = (flags >>> 9) & 0x01; // 0=out, 1=in
+            int type = (flags >>> 10) & 0x01;     // 0=circle, 1=polygon
+            int radius = (flags >>> 16) & 0xFFFF; // meters
+
+            System.out.println("[GeoFenceProcessor] flags index=" + index
+                    + " pointsBits=" + pointsBits
+                    + " enable=" + enable
+                    + " direction=" + direction
+                    + " type=" + (type==0?"circle":"polygon")
+                    + " radius=" + radius + "m");
+
+            // Determine number of points
+            int rem = bb.remaining();
+            int n;
+            if (rem % 8 == 0) {
+                // No explicit count; infer from remaining
+                n = rem / 8;
+            } else {
+                // Expect an explicit count byte, then pairs
+                if (rem < 1) return out;
+                n = Byte.toUnsignedInt(bb.get());
+                rem = bb.remaining();
+                if (rem < n * 8) n = Math.min(n, rem / 8);
+            }
+
+            for (int i = 0; i < n; i++) {
+                if (bb.remaining() < 8) break;
+                int lat_i = bb.getInt();   // LE
+                int lon_i = bb.getInt();   // LE
+                double lat = lat_i / 1e6;
+                double lon = lon_i / 1e6;
+                out.add(lat + "," + lon);
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+        return out;
+    }
+
+    private List<String> parseLegacyBigEndian(byte[] payload) {
+        List<String> out = new ArrayList<>();
+        try {
+            ByteBuffer bb = ByteBuffer.wrap(payload);
+            bb.order(java.nio.ByteOrder.BIG_ENDIAN);
+            if (bb.remaining() < 1) return out;
             int n = Byte.toUnsignedInt(bb.get());
             for (int i = 0; i < n; i++) {
                 if (bb.remaining() < 8) break;
@@ -107,8 +174,14 @@ public class GeoFenceProcessor implements CommandProcessor {
     }
 
     private byte[] buildAck(EV07BMessage msg) {
-        // TODO: build protocol-correct ACK frame including header, length, seq, CRC16, etc.
-        // For now return a minimal placeholder frame. Replace with exact framing per EV-07B doc.
-        return new byte[] {(byte)0xAB, 0x01, (byte)msg.getCommandId()};
+        // ACK payload echoes the command with status OK (0x01)
+        byte[] ackPayload = new byte[] { (byte) GEOFENCE_CMD, 0x01 };
+
+        // Echo properties and sequence if provided; otherwise default to 0x10 (ACK requested bit) and seq 0
+        byte properties = msg.getProperties();
+        if (properties == 0) properties = 0x10;
+        int seq = msg.getSequenceId();
+
+        return FrameUtil.buildFrame(properties, seq, ackPayload);
     }
 }

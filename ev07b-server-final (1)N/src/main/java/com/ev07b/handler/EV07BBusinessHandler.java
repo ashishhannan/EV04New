@@ -62,47 +62,78 @@ public class EV07BBusinessHandler extends SimpleChannelInboundHandler<EV07BMessa
     }
 
     @Override
-    protected void channelRead0(ChannelHandlerContext ctx, EV07BMessage msg) throws Exception {
+    protected void channelRead0(ChannelHandlerContext ctx0, EV07BMessage msg) throws Exception {
+        Channel ch = ctx0.channel();
         String deviceId = msg.getDeviceId();
-        if (deviceId != null && !deviceId.isEmpty()) {
-            // Register active channel for this device
-            connMgr.register(deviceId, ctx.channel());
+        String resolvedId = deviceId;
+        boolean msgIdIsUnknown = resolvedId != null && resolvedId.equalsIgnoreCase("UNKNOWN");
+        if (resolvedId == null || resolvedId.isEmpty() || msgIdIsUnknown) {
+            // Fallback to last known mapping for this channel
+            String fromChannel = connMgr.getDeviceId(ch);
+            if (fromChannel != null && !fromChannel.isEmpty()) {
+                resolvedId = fromChannel;
+                System.out.println("[Business] DeviceId resolved from channel " + ch.id().asShortText() + ": " + resolvedId + (msgIdIsUnknown?" (message had UNKNOWN)":""));
+            } else {
+                System.out.println("[Business] No deviceId in message (or UNKNOWN) and no mapping for channel " + ch.id().asShortText());
+            }
+        } else {
+            System.out.println("[Business] DeviceId from message: " + deviceId);
+        }
+
+        if (resolvedId != null && !resolvedId.isEmpty() && !resolvedId.equalsIgnoreCase("UNKNOWN")) {
+            // Register active channel for this device (do not register UNKNOWN)
+            connMgr.register(resolvedId, ch);
 
             // Update last-seen timestamp
-            deviceService.touch(deviceId);
+            deviceService.touch(resolvedId);
 
             // Check for pending commands
-            List<PendingCommandEntity> pending = pendingRepo.findByDeviceId(deviceId);
+            List<PendingCommandEntity> pending = pendingRepo.findByDeviceId(resolvedId);
             for (PendingCommandEntity p : pending) {
-                if (ctx.channel().isActive()) {
+                if (ch.isActive()) {
                     byte[] payload = p.getPayload();
                     if (payload != null && payload.length > 0) {
-                        ctx.channel().writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(payload));
+                        ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(payload));
                     }
                     pendingRepo.delete(p);
                 }
             }
         }
 
+        // If we resolved a better device id, wrap a new message to pass downstream
+        EV07BMessage toDispatch = msg;
+        if ((deviceId == null || deviceId.isEmpty() || deviceId.equalsIgnoreCase("UNKNOWN")) && resolvedId != null && !resolvedId.isEmpty()) {
+            toDispatch = new EV07BMessage(
+                    resolvedId,
+                    msg.getCommandId(),
+                    msg.getPayload(),
+                    msg.getProperties(),
+                    msg.getSequenceId());
+        }
+
+        if (resolvedId != null && !resolvedId.isEmpty()) {
+            System.out.println("[Business] Dispatch cmd=0x" + Integer.toHexString(toDispatch.getCommandId()) + " to device " + resolvedId);
+        }
+
         // Dispatch to the appropriate command handler
         if (dispatcher != null) {
-            dispatcher.dispatch(msg, ctx.channel());
+            dispatcher.dispatch(toDispatch, ch);
         } else {
             System.err.println("[Netty] CommandDispatcher not initialized yet");
         }
     }
 
     @Override
-    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        Channel ch = ctx.channel();
+    public void channelInactive(ChannelHandlerContext ctx0) throws Exception {
+        Channel ch = ctx0.channel();
         System.out.println("[Netty] Channel inactive: " + ch.remoteAddress());
-        super.channelInactive(ctx);
+        super.channelInactive(ctx0);
     }
 
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+    public void exceptionCaught(ChannelHandlerContext ctx0, Throwable cause) throws Exception {
         System.err.println("[Netty] Exception in handler: " + cause.getMessage());
         cause.printStackTrace();
-        ctx.close();
+        ctx0.close();
     }
 }

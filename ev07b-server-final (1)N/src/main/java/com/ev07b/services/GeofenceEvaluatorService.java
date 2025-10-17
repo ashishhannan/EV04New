@@ -45,7 +45,7 @@ public class GeofenceEvaluatorService {
         Map<Long, Boolean> deviceMap = lastState.computeIfAbsent(deviceId, k -> new ConcurrentHashMap<>());
 
         for (GeofenceEntity g : fences) {
-            ParsedFence pf = parseFenceLE(g.getPayload());
+            ParsedFence pf = parseFence(g.getPayload());
             if (pf == null) continue;
             if (!pf.enable) {
                 System.out.println("[GeofenceEvaluator] Fence idx=" + pf.index + " disabled; skip");
@@ -82,12 +82,18 @@ public class GeofenceEvaluatorService {
         int index; int points; boolean enable; int direction; int type; int radius; double centerLat; double centerLon;
     }
 
-    // Parse little-endian fence: [0x51][flags LE][points...]
-    private ParsedFence parseFenceLE(byte[] payload) {
-        if (payload == null || payload.length < 1 + 4 + 8) return null;
+    // Accept either full command payload [0x51][flags][lat][lon]... or key-value only [flags][lat][lon]
+    private ParsedFence parseFence(byte[] payload) {
+        if (payload == null) return null;
         ByteBuffer bb = ByteBuffer.wrap(payload).order(java.nio.ByteOrder.LITTLE_ENDIAN);
-        int cmd = Byte.toUnsignedInt(bb.get());
-        if (cmd != (CMD_GEOFENCE & 0xFF)) return null;
+        int start = 0;
+        if (payload.length >= 1 && Byte.toUnsignedInt(payload[0]) == (CMD_GEOFENCE & 0xFF)) {
+            // skip command byte
+            if (payload.length < 1 + 4 + 8) return null;
+            bb.position(1);
+        } else {
+            if (payload.length < 4 + 8) return null;
+        }
         int flags = bb.getInt();
         ParsedFence pf = new ParsedFence();
         pf.index = flags & 0x0F;
@@ -96,11 +102,10 @@ public class GeofenceEvaluatorService {
         pf.direction = (flags >>> 9) & 0x01;
         pf.type = (flags >>> 10) & 0x01;
         pf.radius = (flags >>> 16) & 0xFFFF;
-        if (bb.remaining() < 8) return null;
         int lat_i = bb.getInt();
         int lon_i = bb.getInt();
-        pf.centerLat = lat_i / 1e6;
-        pf.centerLon = lon_i / 1e6;
+        pf.centerLat = lat_i / 1e7; // align with controller storage
+        pf.centerLon = lon_i / 1e7;
         return pf;
     }
 
@@ -120,8 +125,8 @@ public class GeofenceEvaluatorService {
     private void sendAlarm(String deviceId, ParsedFence pf, double curLat, double curLon, double distM) {
         try {
             byte state = (byte) ((distM <= pf.radius) ? 0x00 : 0x01);
-            int lat_i = (int)Math.round(curLat * 1_000_000);
-            int lon_i = (int)Math.round(curLon * 1_000_000);
+            int lat_i = (int)Math.round(curLat * 10_000_000);
+            int lon_i = (int)Math.round(curLon * 10_000_000);
             byte[] payload = new byte[1 + 1 + 1 + 1 + 2 + 4 + 4];
             int i = 0;
             payload[i++] = CMD_GEOFENCE;

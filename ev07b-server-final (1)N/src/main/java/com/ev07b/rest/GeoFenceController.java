@@ -20,7 +20,8 @@ import java.util.HashMap;
 public class GeoFenceController {
 
     private static final Logger log = LoggerFactory.getLogger(GeoFenceController.class);
-    private static final byte CMD_GEOFENCE = (byte) 0x51;
+    private static final byte CMD_CONFIGURATION = (byte) 0x02; // per spec: configuration command
+    private static final byte KEY_GEOFENCE = (byte) 0x51;      // geofence key under configuration
 
     @Autowired
     private GeofenceRepository geofenceRepo;
@@ -41,48 +42,63 @@ public class GeoFenceController {
 
     @PostMapping("/{deviceId}")
     public GeofenceEntity create(@PathVariable String deviceId, @RequestBody Map<String,Object> body) {
-        // Only accept radius from user
-        int radius = 100; // default
-        if (body.containsKey("radius")) {
-            Object r = body.get("radius");
-            if (r instanceof Number) radius = ((Number) r).intValue();
-            else if (r instanceof String) radius = Integer.parseInt((String) r);
-        }
-        // Build flag: circle (bit 0), enable (bit 8), radius (bits 16-31)
-        int flag = (1 << 8) | (radius << 16); // circle, enable, radius
-        // For demo, use dummy lat/lon (0)
-        int lat = 0;
-        int lon = 0;
-        byte[] payload = new byte[1 + 4 + 4 + 4]; // key + flag + lat + lon
-        payload[0] = CMD_GEOFENCE;
-        payload[1] = (byte) ((flag >> 24) & 0xFF);
-        payload[2] = (byte) ((flag >> 16) & 0xFF);
-        payload[3] = (byte) ((flag >> 8) & 0xFF);
-        payload[4] = (byte) (flag & 0xFF);
-        payload[5] = (byte) ((lat >> 24) & 0xFF);
-        payload[6] = (byte) ((lat >> 16) & 0xFF);
-        payload[7] = (byte) ((lat >> 8) & 0xFF);
-        payload[8] = (byte) (lat & 0xFF);
-        payload[9] = (byte) ((lon >> 24) & 0xFF);
-        payload[10] = (byte) ((lon >> 16) & 0xFF);
-        payload[11] = (byte) ((lon >> 8) & 0xFF);
-        payload[12] = (byte) (lon & 0xFF);
+        // Accept simple circle geofence: radius (meters), center lat/lon in decimal degrees optional
+        int radius = body.getOrDefault("radius", 100) instanceof Number ? ((Number) body.get("radius")).intValue() : parseIntOr(body.get("radius"), 100);
+        double latD = body.getOrDefault("lat", 0.0) instanceof Number ? ((Number) body.get("lat")).doubleValue() : parseDoubleOr(body.get("lat"), 0.0);
+        double lonD = body.getOrDefault("lon", 0.0) instanceof Number ? ((Number) body.get("lon")).doubleValue() : parseDoubleOr(body.get("lon"), 0.0);
 
-        GeofenceEntity g = new GeofenceEntity(deviceId, "geofence-" + System.currentTimeMillis(), payload);
-        GeofenceEntity saved = geofenceRepo.save(g);
+        // Build flags LE per spec:
+        // Bit0-3: index (0)
+        // Bit4-7: points (0)
+        // Bit8: enable=1
+        // Bit9: direction (0=Out default)
+        // Bit10: type (0=circle)
+        // Bit16-31: radius meters
+        int flags = (1 << 8) | ((radius & 0xFFFF) << 16);
 
-        // Build device-facing framed message: [cmd=0x51][payload...] wrapped as protocol frame
-        byte[] bodyBytes = payload;
-        byte properties = 0x10; // request ACK or set flags per protocol as needed
+        int lat_i = (int) Math.round(latD * 10_000_000); // use 1e7 like GPS key
+        int lon_i = (int) Math.round(lonD * 10_000_000);
+
+        // Store only key-value payload (flags LE + lat LE + lon LE)
+        byte[] keyValue = new byte[4 + 4 + 4];
+        // flags LE
+        keyValue[0] = (byte) (flags & 0xFF);
+        keyValue[1] = (byte) ((flags >>> 8) & 0xFF);
+        keyValue[2] = (byte) ((flags >>> 16) & 0xFF);
+        keyValue[3] = (byte) ((flags >>> 24) & 0xFF);
+        // lat LE
+        keyValue[4] = (byte) (lat_i & 0xFF);
+        keyValue[5] = (byte) ((lat_i >>> 8) & 0xFF);
+        keyValue[6] = (byte) ((lat_i >>> 16) & 0xFF);
+        keyValue[7] = (byte) ((lat_i >>> 24) & 0xFF);
+        // lon LE
+        keyValue[8]  = (byte) (lon_i & 0xFF);
+        keyValue[9]  = (byte) ((lon_i >>> 8) & 0xFF);
+        keyValue[10] = (byte) ((lon_i >>> 16) & 0xFF);
+        keyValue[11] = (byte) ((lon_i >>> 24) & 0xFF);
+
+        GeofenceEntity entity = new GeofenceEntity(deviceId, "geofence-" + System.currentTimeMillis(), keyValue);
+        GeofenceEntity saved = geofenceRepo.save(entity);
+
+        // Build message body: [cmd=0x02][keyLen][key=0x51][keyValue]
+        int keyLen = 1 + keyValue.length; // includes key byte
+        byte[] bodyBytes = new byte[1 + 1 + keyLen];
+        int i = 0;
+        bodyBytes[i++] = CMD_CONFIGURATION;
+        bodyBytes[i++] = (byte) keyLen;
+        bodyBytes[i++] = KEY_GEOFENCE;
+        System.arraycopy(keyValue, 0, bodyBytes, i, keyValue.length);
+
+        byte properties = 0x10; // request ACK
         int seq = sequenceManager.next(deviceId);
         byte[] frame = FrameUtil.buildFrame(properties, seq, bodyBytes);
 
         io.netty.channel.Channel ch = connMgr.getChannel(deviceId);
         if (ch != null && ch.isActive()) {
-            log.info("Sending framed geofence to device {} seq={}", deviceId, seq);
+            log.info("Sending geofence (cfg+key=0x51) to device {} seq={}", deviceId, seq);
             ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(frame));
         } else {
-            log.info("Device offline; queueing framed geofence for {} seq={}", deviceId, seq);
+            log.info("Device offline; queueing geofence for {} seq={}", deviceId, seq);
             commandService.queuePending(deviceId, frame);
         }
         return saved;
@@ -98,11 +114,15 @@ public class GeoFenceController {
             return res;
         }
 
-        // Build framed body with commandId prefix
-        byte[] pl = g.getPayload();
-        byte[] bodyBytes = new byte[1 + (pl == null ? 0 : pl.length)];
-        bodyBytes[0] = CMD_GEOFENCE;
-        if (pl != null && pl.length > 0) System.arraycopy(pl, 0, bodyBytes, 1, pl.length);
+        // Use stored keyValue to build proper message body [cmd][keyLen][key][value]
+        byte[] kv = g.getPayload();
+        int keyLen = 1 + (kv == null ? 0 : kv.length);
+        byte[] bodyBytes = new byte[1 + 1 + keyLen];
+        int i = 0;
+        bodyBytes[i++] = CMD_CONFIGURATION;
+        bodyBytes[i++] = (byte) keyLen;
+        bodyBytes[i++] = KEY_GEOFENCE;
+        if (kv != null && kv.length > 0) System.arraycopy(kv, 0, bodyBytes, i, kv.length);
 
         byte properties = 0x10;
         int seq = sequenceManager.next(deviceId);
@@ -120,5 +140,18 @@ public class GeoFenceController {
             res.put("seq", seq);
         }
         return res;
+    }
+
+    private static int parseIntOr(Object v, int def) {
+        try {
+            if (v instanceof String) return Integer.parseInt((String) v);
+        } catch (Exception ignore) {}
+        return def;
+    }
+    private static double parseDoubleOr(Object v, double def) {
+        try {
+            if (v instanceof String) return Double.parseDouble((String) v);
+        } catch (Exception ignore) {}
+        return def;
     }
 }

@@ -19,14 +19,6 @@ import java.util.List;
 
 /**
  * GeoFenceProcessor
- *
- * Note: The EV-07B protocol document contains the exact byte layout for GeoFence messages.
- * This implementation parses a simple format: first byte indicates number of points,
- * followed by pairs of 4-byte lat (int32, scaled by 1e6) and 4-byte lon (int32, scaled by 1e6).
- *
- * IMPORTANT: If the protocol uses a different layout (flags, radius, type fields, sequence ids),
- * update parseGeoPayload() accordingly using the protocol doc. Placeholders and TODOs are left
- * where precise implementation is required.
  */
 @Component
 public class GeoFenceProcessor implements CommandProcessor {
@@ -72,20 +64,16 @@ public class GeoFenceProcessor implements CommandProcessor {
         geofenceRepo.save(g);
         System.out.println("[GeoFenceProcessor] Saved geofence for device " + deviceId + ", points=" + parsed.size());
 
-        System.out.println("[GeoFenceProcessor] Parsed geofence items: " + parsed.size());
-        if (!parsed.isEmpty()) {
-            for (int i = 0; i < parsed.size(); i++) {
-                System.out.println("  point[" + i + "]: " + parsed.get(i));
+        // If ACK bit requested, send standard 0x7F success ACK echoing sequence id
+        boolean ackRequested = (msg.getProperties() & 0x10) != 0;
+        if (ackRequested) {
+            byte[] ack = new byte[] { (byte)0x7F, 0x01, 0x00 };
+            byte[] frame = FrameUtil.buildFrame((byte)0x00, msg.getSequenceId(), ack);
+            if (ch != null && ch.isActive()) {
+                ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(frame));
+            } else {
+                commandService.queuePending(deviceId, frame);
             }
-        }
-
-        // Send protocol-correct ACK frame back to device
-        byte[] ack = buildAck(msg);
-        if (ch != null && ch.isActive()) {
-            ch.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(ack));
-        } else {
-            // If not connected, queue ack to be sent when device reconnects
-            commandService.queuePending(deviceId, ack);
         }
     }
 
@@ -142,8 +130,8 @@ public class GeoFenceProcessor implements CommandProcessor {
                 if (bb.remaining() < 8) break;
                 int lat_i = bb.getInt();   // LE
                 int lon_i = bb.getInt();   // LE
-                double lat = lat_i / 1e6;
-                double lon = lon_i / 1e6;
+                double lat = lat_i / 1e7; // align with controller
+                double lon = lon_i / 1e7;
                 out.add(lat + "," + lon);
             }
         } catch (Exception ex) {
@@ -163,25 +151,13 @@ public class GeoFenceProcessor implements CommandProcessor {
                 if (bb.remaining() < 8) break;
                 int lat_i = bb.getInt();
                 int lon_i = bb.getInt();
-                double lat = lat_i / 1e6;
-                double lon = lon_i / 1e6;
+                double lat = lat_i / 1e7; // align with controller
+                double lon = lon_i / 1e7;
                 out.add(lat + "," + lon);
             }
         } catch (Exception ex) {
             ex.printStackTrace();
         }
         return out;
-    }
-
-    private byte[] buildAck(EV07BMessage msg) {
-        // ACK payload echoes the command with status OK (0x01)
-        byte[] ackPayload = new byte[] { (byte) GEOFENCE_CMD, 0x01 };
-
-        // Echo properties and sequence if provided; otherwise default to 0x10 (ACK requested bit) and seq 0
-        byte properties = msg.getProperties();
-        if (properties == 0) properties = 0x10;
-        int seq = msg.getSequenceId();
-
-        return FrameUtil.buildFrame(properties, seq, ackPayload);
     }
 }

@@ -76,28 +76,78 @@ public class EV07BFrameDecoder extends ByteToMessageDecoder {
 
         // Derive fields for EV07BMessage
         int commandId = (bodyBytes.length > 0) ? (bodyBytes[0] & 0xFF) : 0;
-        String deviceId = extractDeviceId(bodyBytes);
+        String deviceId = extractDeviceIdFromKeys(bodyBytes);
+        if (deviceId == null || deviceId.isEmpty() || "UNKNOWN".equalsIgnoreCase(deviceId)) {
+            deviceId = scanAsciiDigits(bodyBytes);
+            if (deviceId == null) deviceId = "UNKNOWN";
+        }
 
         EV07BMessage message = new EV07BMessage(deviceId, commandId, bodyBytes, properties, seqId);
         out.add(message);
     }
 
     /**
-     * Attempt to extract a numeric device ID (IMEI) embedded in the payload.
-     * Adjust logic as needed for your EV04 message layout.
+     * Extract Device ID (Key 0x01) according to protocol key layout.
+     * Layout: [command][ keyLen ][ key ][ value... ] ...
+     * For Device ID key: keyLen=0x10, key=0x01, value=15 ASCII digits.
      */
-    private String extractDeviceId(byte[] body) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : body) {
-            int c = b & 0xFF;
-            if (c >= '0' && c <= '9') {
-                sb.append((char) c);
-                if (sb.length() >= 15) break; // typical IMEI length
+    private String extractDeviceIdFromKeys(byte[] body) {
+        if (body == null || body.length < 1) return "UNKNOWN";
+        int i = 1; // skip command byte
+        try {
+            while (i < body.length) {
+                int keyLen = Byte.toUnsignedInt(body[i++]);
+                if (keyLen < 1) break; // must include at least key byte
+                if (i >= body.length) break;
+                int key = Byte.toUnsignedInt(body[i++]);
+                int valueLen = keyLen - 1;
+                if (valueLen < 0) break;
+                if (i + valueLen > body.length) break;
+
+                if (key == 0x01 && valueLen >= 8) {
+                    // Expect 15 ASCII digits for IMEI by spec (valueLen typically 15)
+                    int n = Math.min(15, valueLen);
+                    StringBuilder sb = new StringBuilder(15);
+                    for (int k = 0; k < n; k++) {
+                        int b = body[i + k] & 0xFF;
+                        if (b >= '0' && b <= '9') {
+                            sb.append((char) b);
+                        } else {
+                            // non-digit encountered; abort this key
+                            sb.setLength(0);
+                            break;
+                        }
+                    }
+                    if (sb.length() >= 6) {
+                        return sb.toString();
+                    }
+                }
+                i += valueLen; // advance to next key body
+            }
+        } catch (Exception ignore) {
+        }
+        return "UNKNOWN";
+    }
+
+    // Fallback: scan contiguous ASCII digits sequence length>=10 as IMEI-like string
+    private String scanAsciiDigits(byte[] body) {
+        if (body == null) return null;
+        int bestStart = -1, bestLen = 0, curStart = -1, curLen = 0;
+        for (int i = 0; i < body.length; i++) {
+            int b = body[i] & 0xFF;
+            if (b >= '0' && b <= '9') {
+                if (curLen == 0) curStart = i;
+                curLen++;
             } else {
-                if (sb.length() >= 6) break;
-                sb.setLength(0);
+                if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
+                curLen = 0; curStart = -1;
             }
         }
-        return sb.length() > 0 ? sb.toString() : "UNKNOWN";
+        if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
+        if (bestLen >= 10 && bestStart >= 0) {
+            int n = Math.min(15, bestLen);
+            return new String(body, bestStart, n);
+        }
+        return null;
     }
 }

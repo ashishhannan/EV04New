@@ -46,7 +46,7 @@ public class HeartbeatProcessor implements CommandProcessor {
         // Log inbound heartbeat
         logRepo.save(new CommandLogEntity(deviceId, msg.getCommandId(), payload));
 
-        // Parse optional GPS key from heartbeat body (LE per protocol)
+        // Parse optional GPS key from heartbeat body (LE per protocol). Some devices may not include GPS here.
         if (payload != null && payload.length >= 1) {
             try {
                 // Body layout: [cmd=0x10][keyLen][key][value...] ...
@@ -56,14 +56,11 @@ public class HeartbeatProcessor implements CommandProcessor {
                     if (keyLen < 1 || i + keyLen - 1 > payload.length) break;
                     int key = Byte.toUnsignedInt(payload[i++]);
                     int valueLen = keyLen - 1;
-                    if (key == KEY_GPS && valueLen == 21) {
-                        // Little-endian GPS value per doc
+                    if (key == KEY_GPS && valueLen >= 8) {
+                        // Little-endian GPS value per doc (lat/lon in 1e7)
                         ByteBuffer bb = ByteBuffer.wrap(payload, i, valueLen).order(java.nio.ByteOrder.LITTLE_ENDIAN);
                         int lat_i = bb.getInt();
                         int lon_i = bb.getInt();
-                        // skip speed(2), direction(2), altitude(2), acc(2), mileage(4)
-                        bb.position(bb.position() + 2 + 2 + 2 + 2 + 4);
-                        int sats = bb.get() & 0xFF;
                         double lat = lat_i / 1e7; // GPS uses 1e7 per doc
                         double lon = lon_i / 1e7;
                         // Evaluate geofences for transitions and alarms
@@ -76,16 +73,13 @@ public class HeartbeatProcessor implements CommandProcessor {
             }
         }
 
-        // Build ACK payload per protocol: echo command with status OK (0x01)
-        byte[] ackPayload = new byte[] { (byte) HEARTBEAT_CMD, 0x01 };
-
-        // Use same properties and sequence as request (unless spec requires different flags)
-        byte properties = msg.getProperties();
-        int seq = msg.getSequenceId();
-
-        byte[] frame = FrameUtil.buildFrame(properties, seq, ackPayload);
-
-        if (ch != null && ch.isActive()) {
+        // If ACK requested (properties bit4), reply with ACK frame per spec: cmd 0x7F, keyLen=0x01, key=0x00 (success)
+        boolean ackRequested = (msg.getProperties() & 0x10) != 0;
+        if (ackRequested && ch != null && ch.isActive()) {
+            byte[] ackBody = new byte[] { (byte) 0x7F, 0x01, 0x00 };
+            byte properties = 0x00; // do not request ACK for ACK
+            int seq = msg.getSequenceId(); // echo sequence id
+            byte[] frame = FrameUtil.buildFrame(properties, seq, ackBody);
             ch.writeAndFlush(Unpooled.wrappedBuffer(frame));
         }
     }

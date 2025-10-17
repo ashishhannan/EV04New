@@ -3,26 +3,24 @@ package com.ev07b.commands;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 import io.netty.channel.Channel;
+import io.netty.buffer.Unpooled;
 
 import com.ev07b.model.EV07BMessage;
 import com.ev07b.services.DeviceService;
 import com.ev07b.repos.CommandLogRepository;
 import com.ev07b.entities.CommandLogEntity;
+import com.ev07b.net.FrameUtil;
 
 /**
  * EV04HeartbeatProcessor
  *
- * Handles EV04/EV07B heartbeat with command id 0x03 (as observed from real device).
- * Uses the currently wired simple encoder (EV07BFrameEncoder in com.ev07b.net),
- * which frames outbound byte[] as: [0xAB][len BE][payload][CRC16 BE].
- *
- * ACK payload is minimal: [0x03, 0x01] where 0x01 indicates OK.
- * Adjust if your device requires a different status byte.
+ * Handles Services command (0x03) heartbeats from device. Heartbeat is a key (0x10) inside this command.
+ * Responds with ACK (0x7F) if ACK flag requested.
  */
 @Component
 public class EV04HeartbeatProcessor implements CommandProcessor {
 
-    private static final int EV04_HEARTBEAT_CMD = 0x03;
+    private static final int SERVICES_CMD = 0x03;
 
     @Autowired
     private DeviceService deviceService;
@@ -32,7 +30,7 @@ public class EV04HeartbeatProcessor implements CommandProcessor {
 
     @Override
     public int commandId() {
-        return EV04_HEARTBEAT_CMD;
+        return SERVICES_CMD;
     }
 
     @Override
@@ -43,16 +41,17 @@ public class EV04HeartbeatProcessor implements CommandProcessor {
         // Update last seen for device
         deviceService.touch(deviceId);
 
-        // Log inbound heartbeat
+        // Log inbound services message
         logRepo.save(new CommandLogEntity(deviceId, msg.getCommandId(), payload));
 
-        // Build minimal ACK payload for EV04 heartbeat
-        byte[] ackPayload = new byte[] { (byte) EV04_HEARTBEAT_CMD, 0x01 };
-
-        // Write raw payload so EV07BFrameEncoder (simple) frames it
-        if (ch != null && ch.isActive()) {
-            ch.writeAndFlush(ackPayload);
+        // If ACK requested (properties bit4), respond with Negative Response (0x7F) success code (0x00)
+        boolean ackRequested = (msg.getProperties() & 0x10) != 0;
+        if (ackRequested && ch != null && ch.isActive()) {
+            byte[] ackBody = new byte[] { (byte) 0x7F, 0x01, 0x00 };
+            byte properties = 0x00; // don't request ACK for ACK
+            int seq = msg.getSequenceId();
+            byte[] frame = FrameUtil.buildFrame(properties, seq, ackBody);
+            ch.writeAndFlush(Unpooled.wrappedBuffer(frame));
         }
     }
 }
-
